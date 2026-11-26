@@ -405,6 +405,13 @@ def render_html(catalog: dict[str, Any]) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FNX Labs Container Image Catalog — Daniel G. Cosenza</title>
   <meta name="description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable Critical/High CVEs.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://dgcosenza.github.io/">
+  <meta property="og:title" content="FNX Labs Container Image Catalog — Daniel G. Cosenza">
+  <meta property="og:description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable Critical/High CVEs.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="FNX Labs Container Image Catalog — Daniel G. Cosenza">
+  <meta name="twitter:description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable Critical/High CVEs.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="canonical" href="https://dgcosenza.github.io/">
   <style>
