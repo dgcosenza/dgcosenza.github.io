@@ -405,6 +405,8 @@ def render_html(catalog: dict[str, Any]) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FNX Labs Container Image Catalog — Daniel G. Cosenza</title>
   <meta name="description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable Critical/High CVEs.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="canonical" href="https://dgcosenza.github.io/">
   <style>
     :root {{
       --bg: #0b1020;
@@ -501,7 +503,7 @@ def render_html(catalog: dict[str, Any]) -> str:
       font-size: 0.84rem;
       cursor: pointer;
     }}
-    .chip.active {{ background: var(--accent); border-color: var(--accent); color: #fff; }}
+    .chip.active {{ background: #1d4ed8; border-color: #1d4ed8; color: #fff; }}
     .table-card {{
       background: var(--surface);
       border: 1px solid var(--border);
@@ -581,6 +583,7 @@ def render_html(catalog: dict[str, Any]) -> str:
       </p>
     </header>
 
+    <main>
     <section class="kpis" aria-label="Catalog summary">
       <div class="kpi"><div class="kpi-num">{summary['total_images']}</div><div class="kpi-lbl">Maintained Images</div></div>
       <div class="kpi"><div class="kpi-num">{summary['passing_ci']} / {summary['total_images']}</div><div class="kpi-lbl">Passing Daily CI</div></div>
@@ -617,6 +620,7 @@ def render_html(catalog: dict[str, Any]) -> str:
         </tbody>
       </table>
     </div>
+    </main>
 
     <footer>
       <div>Maintained by <strong>Daniel G. Cosenza from FNX Labs</strong> · Packaging licensed under MIT</div>
@@ -716,6 +720,25 @@ def main() -> int:
     (out_dir / ".nojekyll").write_text("", encoding="utf-8")
     (out_dir / "catalog.json").write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
     (out_dir / "index.html").write_text(render_html(catalog), encoding="utf-8")
+    base_url = "https://dgcosenza.github.io/"
+    (out_dir / "favicon.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Catalog icon">'
+        '<rect width="64" height="64" rx="12" fill="#0b1020"/>'
+        '<path d="M18 16h30v9H28v8h17v9H28v14h-10z" fill="#60a5fa"/>'
+        "</svg>\n",
+        encoding="utf-8",
+    )
+    (out_dir / "robots.txt").write_text(
+        f"User-agent: *\nAllow: /\nSitemap: {base_url}sitemap.xml\n",
+        encoding="utf-8",
+    )
+    (out_dir / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"  <url><loc>{base_url}</loc></url>\n"
+        "</urlset>\n",
+        encoding="utf-8",
+    )
 
     print(
         f"Built catalog in {out_dir}: {summary['total_images']} images, "
