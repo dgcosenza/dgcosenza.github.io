@@ -2,7 +2,9 @@ name: Deploy Catalog to GitHub Pages
 
 on:
   schedule:
-    - cron: '45 6 * * *'
+    # Hourly snapshot so the catalog follows image rebuilds (daily window and
+    # push-triggered builds) without cross-repository triggers.
+    - cron: '17 * * * *'
   push:
     branches: [main]
   pull_request:
@@ -35,6 +37,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/build-catalog.py --owner dgcosenza --out site
+
+      - name: Verify catalog publishes only completed, final states
+        run: python3 .github/scripts/verify-catalog.py site
 
       - name: Verify zero private content in repository and generated site
         env:
