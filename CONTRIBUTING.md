@@ -31,6 +31,20 @@ all of them green before it can be merged into `main`:
 
 You can run the content check locally with `.github/scripts/public-check.sh`.
 
+## Tests
+
+The catalog's automated checks are the public content check and the catalog
+generator build. Continuous integration runs both on every push and pull
+request. You can run them locally with:
+
+    .github/scripts/public-check.sh
+    python3 scripts/build-catalog.py --owner dgcosenza --out site
+
+As major new functionality is added to the catalog generator or site, checks
+or tests for that functionality must be added to this automated suite. Pull
+requests that change generator behaviour or generated output should include
+the corresponding check or test updates.
+
 ## Commit and pull request style
 
 - Use clear, present-tense commit subjects (for example `fix: improve contrast on filter chips`).
