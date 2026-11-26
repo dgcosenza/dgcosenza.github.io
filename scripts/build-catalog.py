@@ -108,6 +108,8 @@ def parse_versions(vdata: dict[str, Any] | None, slug: str, owner: str) -> dict[
             "upstream_license": str(vdata.get("upstream_license") or ""),
             "packaging_license": str(vdata.get("packaging_license") or "MIT"),
             "debian_version": str(vdata.get("debian_version") or ""),
+            "base_os": str((vdata.get("components") or {}).get("Base OS") or ""),
+            "base_image": str(vdata.get("base_image") or ""),
             "architectures": list(vdata.get("architectures") or []),
             "sizes_mb": {},
             "signed": bool(vdata.get("signed", False)),
@@ -137,6 +139,8 @@ def parse_versions(vdata: dict[str, Any] | None, slug: str, owner: str) -> dict[
         "upstream_license": str(vdata.get("upstream_license") or ""),
         "packaging_license": str(vdata.get("packaging_license") or "MIT"),
         "debian_version": str(vdata.get("debian_version") or ""),
+        "base_os": str((vdata.get("components") or {}).get("Base OS") or ""),
+        "base_image": str(vdata.get("base_image") or ""),
         "architectures": list(vdata.get("architectures") or []),
         "sizes_mb": dict(vdata.get("sizes_mb") or {}),
         "signed": bool(vdata.get("signed", False)),
@@ -235,6 +239,8 @@ def fetch_repo_record(owner: str, repo: dict[str, Any], token: str | None) -> di
         "upstream_name": sanitize_text(parsed.get("upstream_name")),
         "upstream_version": sanitize_text(parsed.get("upstream_version")) or (rel_tag.split("-202")[0] if rel_tag else ""),
         "debian_version": sanitize_text(parsed.get("debian_version")),
+        "base_os": sanitize_text(parsed.get("base_os")),
+        "base_image": sanitize_text(parsed.get("base_image")),
         "architectures": parsed.get("architectures") or [],
         "sizes_mb": parsed.get("sizes_mb") or {},
         "packaging_license": sanitize_text(pkg_lic),
@@ -275,7 +281,14 @@ def render_html(catalog: dict[str, Any]) -> str:
         sc_url = html.escape(item["scorecard_url"])
 
         ver_esc = html.escape(item["upstream_version"] or "—")
-        deb_esc = f"Debian {html.escape(item['debian_version'])}" if item["debian_version"] else "Debian 13"
+        if item["debian_version"]:
+            deb_esc = f"Debian {html.escape(item['debian_version'])}"
+        elif item.get("base_os"):
+            deb_esc = html.escape(item["base_os"])
+        elif item.get("base_image") and "ubuntu" in item["base_image"].lower():
+            deb_esc = html.escape(item["base_image"].split("@", 1)[0])
+        else:
+            deb_esc = "Debian 13"
         arches = item["architectures"] or []
         arch_short = " | ".join(a.replace("linux/", "") for a in arches) if arches else "amd64"
         multi = len(arches) >= 2
@@ -298,10 +311,10 @@ def render_html(catalog: dict[str, Any]) -> str:
         elif fixable == 0:
             zero_fix = True
             unfix_note = f'<span class="sub">{unfixed} upstream-unfixed</span>' if unfixed is not None else ""
-            cve_html = f'<span class="pill ok">0 fixable C/H</span>{unfix_note}'
+            cve_html = f'<span class="pill ok">0 fixable (all sev)</span>{unfix_note}'
         else:
             zero_fix = False
-            cve_html = f'<span class="pill fail">{fixable} fixable C/H</span>'
+            cve_html = f'<span class="pill fail">{fixable} fixable</span>'
 
         sc_parts: list[str] = []
         if item["signed"]:
@@ -404,14 +417,14 @@ def render_html(catalog: dict[str, Any]) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FNX Labs Container Image Catalog — Daniel G. Cosenza</title>
-  <meta name="description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable Critical/High CVEs.">
+  <meta name="description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable CVEs of any severity.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://dgcosenza.github.io/">
   <meta property="og:title" content="FNX Labs Container Image Catalog — Daniel G. Cosenza">
-  <meta property="og:description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable Critical/High CVEs.">
+  <meta property="og:description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable CVEs of any severity.">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="FNX Labs Container Image Catalog — Daniel G. Cosenza">
-  <meta name="twitter:description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable Critical/High CVEs.">
+  <meta name="twitter:description" content="Hardened, daily-rebuilt Debian 13 container images with Cosign OIDC signatures, SLSA Build L3 provenance, SBOMs, and zero fixable CVEs of any severity.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="canonical" href="https://dgcosenza.github.io/">
   <style>
@@ -583,7 +596,7 @@ def render_html(catalog: dict[str, Any]) -> str:
       <p class="lead">
         Hardened, daily-rebuilt Debian 13 (<code>trixie-slim</code>) container images maintained by
         <strong>Daniel G. Cosenza from FNX Labs</strong>. Every published digest is gated on
-        <strong>0 fixable Critical/High CVEs</strong> (Trivy + Grype on SBOM), efficiency-checked with Dive,
+        <strong>0 fixable CVEs of any severity</strong> (Trivy + Grype on SBOM), efficiency-checked with Dive,
         keyless-signed with <strong>Cosign OIDC</strong>, attested with <strong>SPDX &amp; CycloneDX SBOMs</strong>
         and <strong>SLSA Build L3</strong> provenance, and mirrored with identical multi-arch digests to
         Docker Hub and GHCR.
@@ -594,7 +607,7 @@ def render_html(catalog: dict[str, Any]) -> str:
     <section class="kpis" aria-label="Catalog summary">
       <div class="kpi"><div class="kpi-num">{summary['total_images']}</div><div class="kpi-lbl">Maintained Images</div></div>
       <div class="kpi"><div class="kpi-num">{summary['passing_ci']} / {summary['total_images']}</div><div class="kpi-lbl">Passing Daily CI</div></div>
-      <div class="kpi"><div class="kpi-num">{summary['zero_fixable_cves']}</div><div class="kpi-lbl">Zero Fixable Critical/High CVEs</div></div>
+      <div class="kpi"><div class="kpi-num">{summary['zero_fixable_cves']}</div><div class="kpi-lbl">Zero Fixable CVEs (All Severities)</div></div>
       <div class="kpi"><div class="kpi-num">{summary['signed_images']}</div><div class="kpi-lbl">Cosign OIDC Signed</div></div>
       <div class="kpi"><div class="kpi-num">{summary['multi_arch_images']}</div><div class="kpi-lbl">Multi-Arch (amd64 + arm64)</div></div>
     </section>
@@ -605,7 +618,7 @@ def render_html(catalog: dict[str, Any]) -> str:
       <button class="chip" type="button" data-filter="passing">Passing CI</button>
       <button class="chip" type="button" data-filter="signed">Signed</button>
       <button class="chip" type="button" data-filter="multi">Multi-Arch</button>
-      <button class="chip" type="button" data-filter="zero">0 Fixable C/H</button>
+      <button class="chip" type="button" data-filter="zero">0 Fixable CVEs</button>
     </div>
 
     <div class="table-card">
@@ -750,7 +763,7 @@ def main() -> int:
 
     print(
         f"Built catalog in {out_dir}: {summary['total_images']} images, "
-        f"{summary['passing_ci']} passing CI, {summary['zero_fixable_cves']} zero fixable C/H, "
+        f"{summary['passing_ci']} passing CI, {summary['zero_fixable_cves']} zero fixable CVEs, "
         f"{summary['signed_images']} signed, {summary['multi_arch_images']} multi-arch."
     )
     return 0
