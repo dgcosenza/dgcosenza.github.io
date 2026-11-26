@@ -587,6 +587,7 @@ def render_html(catalog: dict[str, Any]) -> str:
       justify-content: space-between;
       gap: 0.5rem;
     }}
+    footer a {{ text-decoration: underline; text-underline-offset: 2px; }}
   </style>
 </head>
 <body>
