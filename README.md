@@ -11,18 +11,20 @@ Central status, version, signature, and vulnerability catalog for the hardened D
 
 ## What It Publishes
 
-Every day at **06:45 UTC** (and on every push to `main` or manual dispatch), [`.github/workflows/pages.yml`](https://github.com/dgcosenza/dgcosenza.github.io/blob/main/.github/workflows/pages.yml) discovers every public `dgcosenza/*-docker` repository via the GitHub API and aggregates:
+Every hour at minute **17** (and on every push to `main` or manual dispatch), [`.github/workflows/pages.yml`](https://github.com/dgcosenza/dgcosenza.github.io/blob/main/.github/workflows/pages.yml) discovers every public `dgcosenza/*-docker` repository via the GitHub API and aggregates:
 
 - **Resolved versions & base OS:** Upstream component versions, Debian release, architectures (`linux/amd64`, `linux/arm64`), and image sizes from each repository's `versions.json`.
-- **Daily CI build status:** Latest workflow run result and direct run link.
+- **Daily CI build status:** Result of the latest *completed* `daily.yml` run on `main` (queued or running rebuilds never replace the status; they are only noted as "rebuild running"), with a direct run link.
+- **OpenSSF signals:** Live OpenSSF Scorecard score from `api.scorecard.dev` and the OpenSSF Best Practices badge level from `bestpractices.dev`, with retries and the last published value as a fallback if either API is briefly unreachable.
 - **Supply-chain attestations:** Cosign keyless OIDC signing status, SPDX & CycloneDX SBOM availability, SLSA Build L3 provenance status, identical Docker Hub + GHCR digests, and copy-ready verification commands.
 - **Vulnerability posture:** Blocking Trivy + Grype all-severity fixable gate count (`0`) and count of tracked upstream-unfixed CVEs.
-- **Licenses & governance:** Verified `packaging: MIT` and upstream SPDX licenses plus live OpenSSF Scorecard scores.
+- **Licenses & governance:** Verified `packaging: MIT` and upstream SPDX licenses.
 
 ## Build Locally
 
 ```bash
 GH_TOKEN="$(gh auth token)" python3 scripts/build-catalog.py --owner dgcosenza --out site
+python3 .github/scripts/verify-catalog.py site
 python3 -m http.server --directory site 8000
 ```
 

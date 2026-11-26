@@ -12,13 +12,20 @@ import os
 import pathlib
 import re
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
 USER_AGENT = "dgcosenza-container-catalog/1.0"
 API_BASE = "https://api.github.com"
 SCORECARD_BASE = "https://api.scorecard.dev/projects/github.com"
+BEST_PRACTICES_BASE = "https://www.bestpractices.dev"
+PREVIOUS_CATALOG_URL = "https://dgcosenza.github.io/catalog.json"
+# Completed-run conclusions that are a real verdict on the build. Cancelled or
+# skipped runs (e.g. superseded by a newer push) say nothing about image health.
+FINAL_CONCLUSIONS = {"success", "failure", "timed_out", "startup_failure", "action_required"}
 
 
 def load_forbidden_regex() -> re.Pattern[str] | None:
@@ -41,17 +48,50 @@ def sanitize_text(val: str | None) -> str:
     return val.strip()
 
 
-def http_get_json(url: str, token: str | None = None, timeout: int = 15) -> Any | None:
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
-    if token and url.startswith(API_BASE):
+def http_get_json(
+    url: str, token: str | None = None, timeout: int = 20, attempts: int = 1
+) -> Any | None:
+    """GET a JSON document. Retries transient failures (timeouts, 429, 5xx) with backoff.
+
+    A 404 is treated as a definitive "no data" answer and is not retried.
+    """
+    is_github = url.startswith(API_BASE)
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/vnd.github+json" if is_github else "application/json",
+    }
+    if token and is_github:
         headers["Authorization"] = f"Bearer {token}"
         headers["X-GitHub-Api-Version"] = "2022-11-28"
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
-        return None
+    for attempt in range(1, max(1, attempts) + 1):
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404 or (exc.code < 500 and exc.code != 429):
+                return None
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+            pass
+        if attempt < attempts:
+            time.sleep(2 * attempt)
+    return None
+
+
+def load_previous_catalog() -> dict[str, dict[str, Any]]:
+    """Last published catalog, keyed by repo name, used only as a fallback for
+    third-party scores when their public API is temporarily unreachable."""
+    data = http_get_json(PREVIOUS_CATALOG_URL, attempts=3)
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(i.get("repo_name")): i
+        for i in data.get("images") or []
+        if isinstance(i, dict) and i.get("repo_name")
+    }
+
+
+PREVIOUS: dict[str, dict[str, Any]] = {}
 
 
 def list_docker_repos(owner: str, token: str | None) -> list[dict[str, Any]]:
@@ -181,26 +221,29 @@ def fetch_repo_record(owner: str, repo: dict[str, Any], token: str | None) -> di
             except Exception:
                 pass
 
-    # 3. Latest daily.yml workflow run
-    ci_status = "unknown"
-    ci_url = f"https://github.com/{full_name}/actions"
+    # 3. Daily CI: the latest COMPLETED daily.yml run on main with a real verdict.
+    # Queued / in-progress runs never become the status; they only set a note.
+    ci_status = "unavailable"
+    ci_url = f"https://github.com/{full_name}/actions/workflows/daily.yml"
     ci_updated = ""
-    runs_resp = http_get_json(
-        f"{API_BASE}/repos/{full_name}/actions/workflows/daily.yml/runs?branch=main&per_page=1",
-        token=token,
-    )
-    runs = (runs_resp or {}).get("workflow_runs") if isinstance(runs_resp, dict) else None
-    if not runs:
-        runs_resp = http_get_json(
-            f"{API_BASE}/repos/{full_name}/actions/runs?branch=main&per_page=1",
-            token=token,
-        )
-        runs = (runs_resp or {}).get("workflow_runs") if isinstance(runs_resp, dict) else None
-    if isinstance(runs, list) and runs:
-        latest_run = runs[0]
-        ci_status = latest_run.get("conclusion") or latest_run.get("status") or "unknown"
-        ci_url = latest_run.get("html_url") or ci_url
-        ci_updated = latest_run.get("updated_at") or ""
+    ci_run_id = None
+    wf_runs = f"{API_BASE}/repos/{full_name}/actions/workflows/daily.yml/runs?branch=main"
+    done = http_get_json(f"{wf_runs}&status=completed&per_page=30", token=token, attempts=3)
+    completed_runs = done.get("workflow_runs") if isinstance(done, dict) else None
+    for run in completed_runs or []:
+        concl = run.get("conclusion")
+        if concl in FINAL_CONCLUSIONS:
+            ci_status = "success" if concl == "success" else "failure"
+            ci_url = run.get("html_url") or ci_url
+            ci_updated = run.get("updated_at") or ""
+            ci_run_id = run.get("id")
+            break
+    ci_rebuild_running = False
+    for state in ("in_progress", "queued"):
+        active = http_get_json(f"{wf_runs}&status={state}&per_page=1", token=token, attempts=2)
+        if isinstance(active, dict) and active.get("workflow_runs"):
+            ci_rebuild_running = True
+            break
 
     # 4. Latest GitHub Release + signed/provenance/SBOM assets
     rel_tag = ""
@@ -217,11 +260,35 @@ def fetch_repo_record(owner: str, repo: dict[str, Any], token: str | None) -> di
         rel_provenance = any(a.endswith(".intoto.jsonl") for a in asset_names)
         rel_sbom = any(".spdx." in a or ".cdx." in a for a in asset_names)
 
-    # 5. OpenSSF Scorecard score
+    # 5. OpenSSF Scorecard score (published by each repo's scorecard.yml).
+    prev = PREVIOUS.get(name) or {}
     sc_score: float | None = None
-    sc = http_get_json(f"{SCORECARD_BASE}/{full_name}", token=None, timeout=10)
+    sc_date = ""
+    sc = http_get_json(f"{SCORECARD_BASE}/{full_name}", attempts=4)
     if isinstance(sc, dict) and isinstance(sc.get("score"), (int, float)):
         sc_score = round(float(sc["score"]), 1)
+        sc_date = str(sc.get("date") or "")
+    elif isinstance(prev.get("scorecard_score"), (int, float)):
+        sc_score = float(prev["scorecard_score"])
+        sc_date = str(prev.get("scorecard_date") or "")
+
+    # 6. OpenSSF Best Practices badge (looked up by exact repository URL).
+    bp_id: int | None = None
+    bp_level = ""
+    repo_html = f"https://github.com/{full_name}"
+    bp = http_get_json(
+        f"{BEST_PRACTICES_BASE}/en/projects.json?url={urllib.parse.quote(repo_html, safe='')}",
+        attempts=4,
+    )
+    if isinstance(bp, list):
+        for proj in bp:
+            if isinstance(proj, dict) and str(proj.get("repo_url") or "").rstrip("/") == repo_html:
+                bp_id = int(proj["id"])
+                bp_level = str(proj.get("badge_level") or "")
+                break
+    elif prev.get("bestpractices_id"):
+        bp_id = int(prev["bestpractices_id"])
+        bp_level = str(prev.get("bestpractices_level") or "")
 
     image_ref = parsed.get("image") or f"{owner}/{slug}"
     hub_slug = image_ref.split("/", 1)[1] if "/" in image_ref else slug
@@ -248,6 +315,8 @@ def fetch_repo_record(owner: str, repo: dict[str, Any], token: str | None) -> di
         "ci_status": ci_status,
         "ci_url": ci_url,
         "ci_updated": ci_updated,
+        "ci_run_id": ci_run_id,
+        "ci_rebuild_running": ci_rebuild_running,
         "build_date": sanitize_text(parsed.get("build_date")),
         "image_digest": sanitize_text(parsed.get("image_digest")),
         "ghcr_digest": sanitize_text(parsed.get("ghcr_digest")),
@@ -260,7 +329,11 @@ def fetch_repo_record(owner: str, repo: dict[str, Any], token: str | None) -> di
         "fixable_critical_high": parsed.get("fixable_critical_high") if "fixable_critical_high" in parsed else None,
         "unfixed_cve_count": parsed.get("unfixed_cve_count") if "unfixed_cve_count" in parsed else None,
         "scorecard_score": sc_score,
+        "scorecard_date": sc_date,
         "scorecard_url": f"https://scorecard.dev/viewer/?uri=github.com/{full_name}",
+        "bestpractices_id": bp_id,
+        "bestpractices_level": bp_level,
+        "bestpractices_url": f"{BEST_PRACTICES_BASE}/en/projects/{bp_id}" if bp_id else "",
     }
 
 
@@ -268,6 +341,12 @@ def render_html(catalog: dict[str, Any]) -> str:
     items = catalog["images"]
     summary = catalog["summary"]
     gen_at = html.escape(catalog["generated_at_utc"])
+    running = int(summary.get("rebuilds_running") or 0)
+    rebuild_note = (
+        f" ({running} daily rebuild{'s' if running != 1 else ''} running; status shows the last completed run)"
+        if running
+        else ""
+    )
 
     rows_html: list[str] = []
     for idx, item in enumerate(items):
@@ -296,17 +375,19 @@ def render_html(catalog: dict[str, Any]) -> str:
         ci = item["ci_status"]
         if ci == "success":
             ci_badge = f'<a class="pill ok" href="{ci_url}" target="_blank" rel="noopener">passing</a>'
-        elif ci in ("in_progress", "queued"):
-            ci_badge = f'<a class="pill warn" href="{ci_url}" target="_blank" rel="noopener">{html.escape(ci)}</a>'
         elif ci == "failure":
             ci_badge = f'<a class="pill fail" href="{ci_url}" target="_blank" rel="noopener">failing</a>'
         else:
-            ci_badge = f'<a class="pill muted" href="{ci_url}" target="_blank" rel="noopener">{html.escape(ci)}</a>'
+            ci_badge = f'<a class="pill muted" href="{ci_url}" target="_blank" rel="noopener">N/A</a>'
+        if item.get("ci_updated"):
+            ci_badge += f'<span class="sub">{html.escape(item["ci_updated"][:10])}</span>'
+        if item.get("ci_rebuild_running"):
+            ci_badge += '<span class="sub">rebuild running</span>'
 
         fixable = item["fixable_critical_high"]
         unfixed = item["unfixed_cve_count"]
         if fixable is None:
-            cve_html = '<span class="pill muted">pending scan</span>'
+            cve_html = '<span class="pill muted">N/A</span>'
             zero_fix = False
         elif fixable == 0:
             zero_fix = True
@@ -326,15 +407,27 @@ def render_html(catalog: dict[str, Any]) -> str:
         if item["ghcr_digest"]:
             sc_parts.append('<span class="pill info">GHCR + Hub</span>')
         if not sc_parts:
-            sc_parts.append('<span class="pill muted">in progress</span>')
+            sc_parts.append('<span class="pill muted">N/A</span>')
         supply_html = " ".join(sc_parts)
 
         sc_val = item["scorecard_score"]
         if sc_val is not None:
             sc_cls = "ok" if sc_val >= 8.0 else ("info" if sc_val >= 6.5 else "warn")
-            scorecard_html = f'<a class="pill {sc_cls}" href="{sc_url}" target="_blank" rel="noopener">{sc_val:.1f} / 10</a>'
+            scorecard_html = (
+                f'<a class="pill {sc_cls}" href="{sc_url}" target="_blank" rel="noopener" '
+                f'aria-label="OpenSSF Scorecard {sc_val:.1f} out of 10">Scorecard {sc_val:.1f}</a>'
+            )
         else:
-            scorecard_html = f'<a class="pill muted" href="{sc_url}" target="_blank" rel="noopener">pending</a>'
+            scorecard_html = f'<a class="pill muted" href="{sc_url}" target="_blank" rel="noopener">Scorecard N/A</a>'
+        bp_level = item.get("bestpractices_level") or ""
+        if item.get("bestpractices_url") and bp_level:
+            bp_cls = "ok" if bp_level in ("passing", "silver", "gold") else "muted"
+            scorecard_html += (
+                f' <a class="pill {bp_cls}" href="{html.escape(item["bestpractices_url"])}" target="_blank" '
+                f'rel="noopener">Best Practices: {html.escape(bp_level)}</a>'
+            )
+        else:
+            scorecard_html += ' <span class="pill muted">Best Practices N/A</span>'
 
         pkg_lic = html.escape(item["packaging_license"] or "MIT")
         up_lic = html.escape(item["upstream_license"] or "see repo")
@@ -388,7 +481,7 @@ def render_html(catalog: dict[str, Any]) -> str:
           <td>{ci_badge}</td>
           <td>{cve_html}</td>
           <td class="wrap-pills">{supply_html}</td>
-          <td>{scorecard_html}</td>
+          <td class="wrap-pills">{scorecard_html}</td>
           <td class="wrap-pills">{lic_html}</td>
         </tr>
         <tr id="det-{idx}" class="detail-row" hidden>
@@ -611,6 +704,7 @@ def render_html(catalog: dict[str, Any]) -> str:
       <div class="kpi"><div class="kpi-num">{summary['zero_fixable_cves']}</div><div class="kpi-lbl">Zero Fixable CVEs (All Severities)</div></div>
       <div class="kpi"><div class="kpi-num">{summary['signed_images']}</div><div class="kpi-lbl">Cosign OIDC Signed</div></div>
       <div class="kpi"><div class="kpi-num">{summary['multi_arch_images']}</div><div class="kpi-lbl">Multi-Arch (amd64 + arm64)</div></div>
+      <div class="kpi"><div class="kpi-num">{summary['best_practices_passing']}</div><div class="kpi-lbl">OpenSSF Best Practices Passing</div></div>
     </section>
 
     <div class="toolbar">
@@ -632,7 +726,7 @@ def render_html(catalog: dict[str, Any]) -> str:
             <th scope="col">Daily CI</th>
             <th scope="col">CVE Gate</th>
             <th scope="col">Supply Chain</th>
-            <th scope="col">Scorecard</th>
+            <th scope="col">OpenSSF</th>
             <th scope="col">Licenses</th>
           </tr>
         </thead>
@@ -645,7 +739,7 @@ def render_html(catalog: dict[str, Any]) -> str:
 
     <footer>
       <div>Maintained by <strong>Daniel G. Cosenza from FNX Labs</strong> · Packaging licensed under MIT</div>
-      <div>Updated {gen_at} · <a href="catalog.json">catalog.json</a> · <a href="https://github.com/dgcosenza/dgcosenza.github.io">Source</a></div>
+      <div>Snapshot {gen_at}{rebuild_note} · <a href="catalog.json">catalog.json</a> · <a href="https://github.com/dgcosenza/dgcosenza.github.io">Source</a></div>
     </footer>
   </div>
 
@@ -708,6 +802,7 @@ def main() -> int:
     args = parser.parse_args()
 
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    PREVIOUS.update(load_previous_catalog())
     repos = list_docker_repos(args.owner, token)
     if not repos:
         print("ERROR: no public *-docker repositories found.", file=sys.stderr)
@@ -725,10 +820,14 @@ def main() -> int:
         "signed_images": sum(1 for i in images if i["signed"]),
         "slsa_images": sum(1 for i in images if i["slsa_provenance"]),
         "multi_arch_images": sum(1 for i in images if len(i["architectures"]) >= 2),
+        "best_practices_passing": sum(
+            1 for i in images if i["bestpractices_level"] in ("passing", "silver", "gold")
+        ),
+        "rebuilds_running": sum(1 for i in images if i["ci_rebuild_running"]),
     }
 
     catalog = {
-        "schema_version": 1,
+        "schema_version": 2,
         "maintainer": "Daniel G. Cosenza from FNX Labs",
         "owner": args.owner,
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
