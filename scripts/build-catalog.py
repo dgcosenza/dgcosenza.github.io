@@ -605,14 +605,14 @@ def render_html(catalog: dict[str, Any]) -> str:
       <table>
         <thead>
           <tr>
-            <th>Image</th>
-            <th>Version / Base</th>
-            <th>Architectures</th>
-            <th>Daily CI</th>
-            <th>CVE Gate</th>
-            <th>Supply Chain</th>
-            <th>Scorecard</th>
-            <th>Licenses</th>
+            <th scope="col">Image</th>
+            <th scope="col">Version / Base</th>
+            <th scope="col">Architectures</th>
+            <th scope="col">Daily CI</th>
+            <th scope="col">CVE Gate</th>
+            <th scope="col">Supply Chain</th>
+            <th scope="col">Scorecard</th>
+            <th scope="col">Licenses</th>
           </tr>
         </thead>
         <tbody id="rows">
@@ -719,7 +719,8 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / ".nojekyll").write_text("", encoding="utf-8")
     (out_dir / "catalog.json").write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
-    (out_dir / "index.html").write_text(render_html(catalog), encoding="utf-8")
+    page_html = "\n".join(line.rstrip() for line in render_html(catalog).splitlines()) + "\n"
+    (out_dir / "index.html").write_text(page_html, encoding="utf-8")
     base_url = "https://dgcosenza.github.io/"
     (out_dir / "favicon.svg").write_text(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Catalog icon">'
