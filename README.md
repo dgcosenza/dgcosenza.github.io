@@ -16,7 +16,7 @@ Every day at **06:45 UTC** (and on every push to `main` or manual dispatch), [`.
 - **Resolved versions & base OS:** Upstream component versions, Debian release, architectures (`linux/amd64`, `linux/arm64`), and image sizes from each repository's `versions.json`.
 - **Daily CI build status:** Latest workflow run result and direct run link.
 - **Supply-chain attestations:** Cosign keyless OIDC signing status, SPDX & CycloneDX SBOM availability, SLSA Build L3 provenance status, identical Docker Hub + GHCR digests, and copy-ready verification commands.
-- **Vulnerability posture:** Blocking Trivy + Grype fixable Critical/High gate count (`0`) and count of tracked upstream-unfixed CVEs.
+- **Vulnerability posture:** Blocking Trivy + Grype all-severity fixable gate count (`0`) and count of tracked upstream-unfixed CVEs.
 - **Licenses & governance:** Verified `packaging: MIT` and upstream SPDX licenses plus live OpenSSF Scorecard scores.
 
 ## Build Locally
