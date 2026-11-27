@@ -155,16 +155,14 @@ class VerifyCatalogGateTests(unittest.TestCase):
             (p / "index.html").write_text("<html><body>passing Scorecard 7.3 Best Practices: passing</body></html>", encoding="utf-8")
             self.assertEqual(verify_catalog.verify_site(p, min_images=1), [])
 
-    def test_verify_allows_unregistered_allowlisted_image(self) -> None:
+    def test_verify_rejects_unregistered_image(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             p = pathlib.Path(tmp)
             cat = self._sample_catalog(name="fnxvm", bestpractices_level="", bestpractices_url="")
             (p / "catalog.json").write_text(json.dumps(cat), encoding="utf-8")
-            (p / "index.html").write_text(
-                "<html><body>passing Scorecard 7.0 Best Practices: unregistered</body></html>",
-                encoding="utf-8",
-            )
-            self.assertEqual(verify_catalog.verify_site(p, min_images=1), [])
+            (p / "index.html").write_text("<html><body>passing Scorecard 7.0</body></html>", encoding="utf-8")
+            errors = verify_catalog.verify_site(p, min_images=1)
+            self.assertTrue(any("Best Practices" in e for e in errors), errors)
 
     def test_verify_rejects_na_and_missing_signals(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
