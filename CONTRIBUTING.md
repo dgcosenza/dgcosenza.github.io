@@ -33,12 +33,15 @@ You can run the content check locally with `.github/scripts/public-check.sh`.
 
 ## Tests
 
-The catalog's automated checks are the public content check and the catalog
-generator build. Continuous integration runs both on every push and pull
-request. You can run them locally with:
+The catalog's automated checks are the unit test suite, the public content
+check, the catalog generator build, and the publish completeness gate.
+Continuous integration runs all of them on every push and pull request. You
+can run them locally with:
 
+    python3 -m unittest discover -s tests -v
     .github/scripts/public-check.sh
     python3 scripts/build-catalog.py --owner dgcosenza --out site
+    python3 .github/scripts/verify-catalog.py site
 
 As major new functionality is added to the catalog generator or site, checks
 or tests for that functionality must be added to this automated suite. Pull

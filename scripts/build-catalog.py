@@ -119,15 +119,18 @@ def parse_versions(vdata: dict[str, Any] | None, slug: str, owner: str) -> dict[
     if not isinstance(vdata, dict):
         return {}
 
-    # Multi-series format (e.g., mariadb-docker with series: {"11.8": ..., "12.3": ...})
-    if isinstance(vdata.get("series"), dict) and vdata["series"]:
-        series_map: dict[str, Any] = vdata["series"]
-        vers = [str(s.get("version") or k) for k, s in series_map.items() if isinstance(s, dict)]
+    # Multi-series / multi-track format (e.g., mariadb-docker with tracks: {"11.8": ..., "12.3": ...})
+    series_map = vdata.get("series") if isinstance(vdata.get("series"), dict) and vdata["series"] else vdata.get("tracks")
+    if isinstance(series_map, dict) and series_map:
+        keys = sorted(series_map.keys())
+        vers = [str(series_map[k].get("version") or k) for k in keys if isinstance(series_map[k], dict)]
         fixable = 0
         unfixed_union: set[str] = set()
         digest = ""
         ghcr_digest = ""
-        for _k, s in series_map.items():
+        sizes_mb: dict[str, Any] = {}
+        for k in keys:
+            s = series_map[k]
             if not isinstance(s, dict):
                 continue
             fixable = max(
@@ -141,6 +144,8 @@ def parse_versions(vdata: dict[str, Any] | None, slug: str, owner: str) -> dict[
                 digest = str(s["digest"])
             if s.get("ghcr_digest"):
                 ghcr_digest = str(s["ghcr_digest"])
+            if isinstance(s.get("sizes_mb"), dict) and s["sizes_mb"]:
+                sizes_mb = dict(s["sizes_mb"])
         return {
             "image": str(vdata.get("image") or f"{owner}/{slug}"),
             "upstream_name": str(vdata.get("upstream_name") or ""),
@@ -151,14 +156,15 @@ def parse_versions(vdata: dict[str, Any] | None, slug: str, owner: str) -> dict[
             "base_os": str((vdata.get("components") or {}).get("Base OS") or ""),
             "base_image": str(vdata.get("base_image") or ""),
             "architectures": list(vdata.get("architectures") or []),
-            "sizes_mb": {},
+            "sizes_mb": sizes_mb,
             "signed": bool(vdata.get("signed", False)),
             "slsa_provenance": bool(vdata.get("slsa_provenance", False)),
-            "build_date": str(vdata.get("build_date") or ""),
+            "build_date": str(vdata.get("build_date") or vdata.get("last_updated") or ""),
             "image_digest": digest,
             "ghcr_digest": ghcr_digest,
             "fixable_critical_high": fixable,
             "unfixed_cve_count": len(unfixed_union),
+            "target_digests": dict(vdata.get("target_digests") or {}),
         }
 
     unfixed = vdata.get("unfixed_cves") or []
@@ -185,11 +191,12 @@ def parse_versions(vdata: dict[str, Any] | None, slug: str, owner: str) -> dict[
         "sizes_mb": dict(vdata.get("sizes_mb") or {}),
         "signed": bool(vdata.get("signed", False)),
         "slsa_provenance": bool(vdata.get("slsa_provenance", False)),
-        "build_date": str(vdata.get("build_date") or ""),
+        "build_date": str(vdata.get("build_date") or vdata.get("last_updated") or ""),
         "image_digest": digest,
         "ghcr_digest": ghcr_digest,
         "fixable_critical_high": int(fixable_raw or 0),
         "unfixed_cve_count": len(unfixed),
+        "target_digests": dict(vdata.get("target_digests") or {}),
     }
 
 
@@ -292,6 +299,20 @@ def fetch_repo_record(owner: str, repo: dict[str, Any], token: str | None) -> di
 
     image_ref = parsed.get("image") or f"{owner}/{slug}"
     hub_slug = image_ref.split("/", 1)[1] if "/" in image_ref else slug
+    hub_images = [hub_slug]
+    target_digests = parsed.get("target_digests") or {}
+    if isinstance(target_digests, dict) and len(target_digests) > 1:
+        prefix = ""
+        for tname in target_digests:
+            if hub_slug.endswith(f"-{tname}"):
+                prefix = hub_slug[: -len(tname)]
+                break
+        if prefix:
+            derived = [f"{prefix}{tname}" for tname in target_digests]
+            if hub_slug in derived:
+                derived.remove(hub_slug)
+                derived.insert(0, hub_slug)
+            hub_images = derived
     pkg_lic = (repo.get("license") or {}).get("spdx_id") or parsed.get("packaging_license") or "MIT"
 
     return {
@@ -300,6 +321,7 @@ def fetch_repo_record(owner: str, repo: dict[str, Any], token: str | None) -> di
         "repo_url": repo["html_url"],
         "description": sanitize_text(repo.get("description")),
         "image": image_ref,
+        "hub_images": hub_images,
         "hub_url": f"https://hub.docker.com/r/{owner}/{hub_slug}",
         "ghcr_ref": f"ghcr.io/{owner}/{hub_slug}",
         "ghcr_url": f"https://github.com/{full_name}/pkgs/container/{hub_slug}",
@@ -448,6 +470,17 @@ def render_html(catalog: dict[str, Any]) -> str:
         size_sub = f'<span class="sub">{size_line}</span>' if size_line else ""
         bdate = html.escape(item["build_date"] or "—")
 
+        hub_imgs = item.get("hub_images") or []
+        if len(hub_imgs) > 1:
+            owner_name = catalog["owner"]
+            hub_links = " / ".join(
+                f'<a href="https://hub.docker.com/r/{html.escape(owner_name)}/{html.escape(h)}" target="_blank" rel="noopener">{html.escape(h)}</a>'
+                for h in hub_imgs
+            )
+            hub_link_html = f"Docker Hub ({hub_links})"
+        else:
+            hub_link_html = f'<a href="{hub_url}" target="_blank" rel="noopener">Docker Hub</a>'
+
         rows_html.append(
             f"""
         <tr class="img-row"
@@ -464,7 +497,7 @@ def render_html(catalog: dict[str, Any]) -> str:
             </div>
             <div class="desc">{desc_esc}</div>
             <div class="links">
-              <a href="{hub_url}" target="_blank" rel="noopener">Docker Hub</a> ·
+              {hub_link_html} ·
               <a href="{ghcr_url}" target="_blank" rel="noopener">GHCR</a> ·
               <a href="{rel_url}" target="_blank" rel="noopener">Releases{(' (' + html.escape(item['release_tag']) + ')') if item['release_tag'] else ''}</a>
             </div>
@@ -699,7 +732,7 @@ def render_html(catalog: dict[str, Any]) -> str:
 
     <main>
     <section class="kpis" aria-label="Catalog summary">
-      <div class="kpi"><div class="kpi-num">{summary['total_images']}</div><div class="kpi-lbl">Maintained Images</div></div>
+      <div class="kpi"><div class="kpi-num">{summary['total_images']}</div><div class="kpi-lbl">Repositories ({summary.get('total_hub_images', summary['total_images'])} Hub Images)</div></div>
       <div class="kpi"><div class="kpi-num">{summary['passing_ci']} / {summary['total_images']}</div><div class="kpi-lbl">Passing Daily CI</div></div>
       <div class="kpi"><div class="kpi-num">{summary['zero_fixable_cves']}</div><div class="kpi-lbl">Zero Fixable CVEs (All Severities)</div></div>
       <div class="kpi"><div class="kpi-num">{summary['signed_images']}</div><div class="kpi-lbl">Cosign OIDC Signed</div></div>
@@ -815,6 +848,7 @@ def main() -> int:
 
     summary = {
         "total_images": len(images),
+        "total_hub_images": sum(len(i.get("hub_images") or [i["name"]]) for i in images),
         "passing_ci": sum(1 for i in images if i["ci_status"] == "success"),
         "zero_fixable_cves": sum(1 for i in images if i["fixable_critical_high"] == 0),
         "signed_images": sum(1 for i in images if i["signed"]),
