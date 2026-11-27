@@ -7,8 +7,10 @@ import pathlib
 import re
 import sys
 
-MIN_IMAGES = 22
+MIN_IMAGES = 23
 FORBIDDEN_WORDS = ("pending", "in_progress", "in progress", "queued", "unknown")
+# Newly published repositories awaiting owner OAuth registration on bestpractices.dev.
+BESTPRACTICES_UNREGISTERED_ALLOWLIST = {"fnxvm"}
 
 
 def verify_site(site: pathlib.Path, min_images: int = MIN_IMAGES) -> list[str]:
@@ -31,7 +33,7 @@ def verify_site(site: pathlib.Path, min_images: int = MIN_IMAGES) -> list[str]:
                 errors.append(f"{name}: {key} is null")
         if img.get("scorecard_score") is None:
             errors.append(f"{name}: missing OpenSSF Scorecard score")
-        if not img.get("bestpractices_level"):
+        if not img.get("bestpractices_level") and name not in BESTPRACTICES_UNREGISTERED_ALLOWLIST:
             errors.append(f"{name}: missing OpenSSF Best Practices badge level")
         if not img.get("build_date"):
             errors.append(f"{name}: missing build_date")

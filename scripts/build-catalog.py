@@ -449,7 +449,7 @@ def render_html(catalog: dict[str, Any]) -> str:
                 f'rel="noopener">Best Practices: {html.escape(bp_level)}</a>'
             )
         else:
-            scorecard_html += ' <span class="pill muted">Best Practices N/A</span>'
+            scorecard_html += ' <span class="pill muted">Best Practices: unregistered</span>'
 
         pkg_lic = html.escape(item["packaging_license"] or "MIT")
         up_lic = html.escape(item["upstream_license"] or "see repo")
