@@ -8,17 +8,6 @@ import re
 import sys
 
 MIN_IMAGES = 30
-# Newly launched repositories awaiting interactive GitHub OAuth registration on bestpractices.dev.
-# Remove each slug from this allowlist once its OpenSSF Best Practices badge is registered.
-BESTPRACTICES_UNREGISTERED_ALLOWLIST = frozenset({
-    "duckdns",
-    "excalidraw",
-    "fail2ban",
-    "healthchecks",
-    "rustdesk",
-    "vscode",
-    "wireguard",
-})
 FORBIDDEN_WORDS = ("pending", "in_progress", "in progress", "queued", "unknown")
 
 
@@ -42,7 +31,7 @@ def verify_site(site: pathlib.Path, min_images: int = MIN_IMAGES) -> list[str]:
                 errors.append(f"{name}: {key} is null")
         if img.get("scorecard_score") is None:
             errors.append(f"{name}: missing OpenSSF Scorecard score")
-        if not img.get("bestpractices_level") and name not in BESTPRACTICES_UNREGISTERED_ALLOWLIST:
+        if not img.get("bestpractices_level"):
             errors.append(f"{name}: missing OpenSSF Best Practices badge level")
         if not img.get("build_date"):
             errors.append(f"{name}: missing build_date")
