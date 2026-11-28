@@ -155,6 +155,14 @@ class VerifyCatalogGateTests(unittest.TestCase):
             (p / "index.html").write_text("<html><body>passing Scorecard 7.3 Best Practices: passing</body></html>", encoding="utf-8")
             self.assertEqual(verify_catalog.verify_site(p, min_images=1), [])
 
+    def test_verify_allows_allowlisted_unregistered_image(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = pathlib.Path(tmp)
+            cat = self._sample_catalog(name="duckdns", bestpractices_level="", bestpractices_url="")
+            (p / "catalog.json").write_text(json.dumps(cat), encoding="utf-8")
+            (p / "index.html").write_text("<html><body>passing Scorecard 7.3 Best Practices: unregistered</body></html>", encoding="utf-8")
+            self.assertEqual(verify_catalog.verify_site(p, min_images=1), [])
+
     def test_verify_rejects_unregistered_image(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             p = pathlib.Path(tmp)
