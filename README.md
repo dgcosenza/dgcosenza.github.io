@@ -8,7 +8,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dgcosenza/dgcosenza.github.io/badge)](https://scorecard.dev/viewer/?uri=github.com/dgcosenza/dgcosenza.github.io)
 
 [![Live Catalog](https://img.shields.io/badge/catalog-live%20on%20GitHub%20Pages-0b1020?logo=githubpages&logoColor=white)](https://dgcosenza.github.io/)
-[![Tracked Images](https://img.shields.io/badge/catalog-23%20repos%20%7C%2025%20Hub%20images-2496ED?logo=docker&logoColor=white)](https://dgcosenza.github.io/)
+[![Tracked Images](https://img.shields.io/badge/catalog-30%20repos%20%7C%2032%20Hub%20images-2496ED?logo=docker&logoColor=white)](https://dgcosenza.github.io/)
 [![Trivy + Grype: 0 Fixable CVEs](https://img.shields.io/badge/Trivy%20%2B%20Grype-0%20fixable%20CVEs-brightgreen?logo=trivy&logoColor=white)](https://dgcosenza.github.io/)
 [![Signed: Cosign OIDC](https://img.shields.io/badge/signed-Cosign%20OIDC-blueviolet)](https://dgcosenza.github.io/)
 [![SLSA Build L3](https://img.shields.io/badge/SLSA-Build%20L3-brightgreen)](https://dgcosenza.github.io/)
